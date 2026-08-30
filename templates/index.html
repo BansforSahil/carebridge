@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CareBridge</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="ibm-mark"></div>
+      <!-- <div class="divider"></div> -->
+      <div>
+        <div class="product-name">CareBridge</div>
+        <div class="product-subtitle">AI healthcare awareness & access</div>
+      </div>
+    </div>
+    <div class="status">
+      <span class="status-dot"></span>
+      AI assistant online
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">HEALTHCARE • ACCESS • RESPONSIBLE AI</p>
+        <h1>Healthcare information,<br><span>made easier to reach.</span></h1>
+        <p class="hero-copy">
+          Ask questions in your language. Get clear health awareness information
+          and help finding relevant healthcare resources.
+        </p>
+      </div>
+      <div class="hero-grid" aria-hidden="true">
+        <div></div><div></div><div></div>
+        <div></div><div class="grid-accent"></div><div></div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="side-panel">
+        <p class="panel-label">QUICK START</p>
+        <button class="prompt-card" data-prompt="What are some simple ways to prevent common infections?">
+          <span class="icon">+</span>
+          <span><strong>Prevention</strong><small>Everyday health habits</small></span>
+        </button>
+        <button class="prompt-card" data-prompt="Explain vaccination in simple language.">
+          <span class="icon">+</span>
+          <span><strong>Vaccination</strong><small>Understand immunization</small></span>
+        </button>
+        <button class="prompt-card" data-prompt="Help me find healthcare resources near me.">
+          <span class="icon">+</span>
+          <span><strong>Find resources</strong><small>Healthcare access</small></span>
+        </button>
+        <button class="prompt-card" data-prompt="Give me simple nutrition advice.">
+          <span class="icon">+</span>
+          <span><strong>Nutrition</strong><small>Practical awareness</small></span>
+        </button>
+
+        <div class="safety-note">
+          <span class="info-icon">i</span>
+          <div>
+            <strong>Awareness, not diagnosis</strong>
+            <p>CareBridge provides educational information and is not a doctor or emergency service.</p>
+          </div>
+        </div>
+      </aside>
+
+      <section class="chat-panel">
+        <div class="chat-header">
+          <div>
+            <p class="panel-label">CAREBRIDGE ASSISTANT</p>
+            <h2>How can I help?</h2>
+          </div>
+          <button id="clearBtn" class="ghost-btn">Clear</button>
+        </div>
+
+        <div id="messages" class="messages">
+          <div class="message assistant">
+            <div class="avatar">C</div>
+            <div class="bubble">
+              <div class="message-meta">CAREBRIDGE</div>
+              <p>Hello. I can explain healthcare topics in simple language, help with prevention awareness, and help you find healthcare resources.</p>
+              <p>What would you like to know?</p>
+            </div>
+          </div>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <!-- Hidden file input — triggered by the image button below -->
+          <input type="file" id="imageInput" accept="image/*" style="display:none">
+          <!-- Image preview bar — shown after a file is picked, hidden otherwise -->
+          <div id="imagePreviewBar" class="image-preview-bar" style="display:none">
+            <img id="imagePreviewThumb" class="image-thumb" alt="Selected medicine image">
+            <span id="imagePreviewName" class="image-name"></span>
+            <button id="imageClearBtn" class="image-clear-btn" type="button" title="Remove image">✕</button>
+          </div>
+          <textarea id="messageInput" rows="1"
+            placeholder="Ask a healthcare question..."
+            aria-label="Healthcare question"></textarea>
+          <div class="composer-bottom">
+            <span>CareBridge • multilingual • responsible AI</span>
+            <div class="composer-actions">
+              <button id="imageBtn" class="image-btn" type="button" title="Upload medicine image for analysis">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+                  <path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4 5H5l3.5-4.5z"/>
+                </svg>
+                <span>Image</span>
+              </button>
+              <select id="langSelect" class="lang-select" title="Select your speaking language">
+                <option value="en-IN">English</option>
+                <option value="hi-IN">हिन्दी (Hindi)</option>
+              </select>
+              <button id="micBtn" class="mic-btn" type="button" title="Speak your question">
+                <svg id="micIcon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+                  <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v6a2 2 0 0 0 4 0V5a2 2 0 0 0-2-2zm-1 15.93V21H9v2h6v-2h-2v-2.07A7 7 0 0 0 19 12h-2a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93z"/>
+                </svg>
+                <span id="micLabel">Voice</span>
+              </button>
+              <button id="stopAudioBtn" class="stop-audio-btn" type="button" title="Stop audio playback" style="display:none">
+                &#9632; Stop Audio
+              </button>
+              <button id="sendBtn" class="send-btn" type="submit">
+                Send <span>→</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+    </section>
+  </main>
+
+  <footer>
+  </footer>
+
+<script>
+const form = document.getElementById("chatForm");
+const input = document.getElementById("messageInput");
+const messages = document.getElementById("messages");
+const sendBtn = document.getElementById("sendBtn");
+const clearBtn = document.getElementById("clearBtn");
+const micBtn       = document.getElementById("micBtn");
+const micLabel     = document.getElementById("micLabel");
+const langSelect   = document.getElementById("langSelect");
+const stopAudioBtn = document.getElementById("stopAudioBtn");
+const imageBtn     = document.getElementById("imageBtn");
+const imageInput   = document.getElementById("imageInput");
+const imagePreviewBar  = document.getElementById("imagePreviewBar");
+const imagePreviewThumb = document.getElementById("imagePreviewThumb");
+const imagePreviewName = document.getElementById("imagePreviewName");
+const imageClearBtn    = document.getElementById("imageClearBtn");
+
+/* ── Speech-to-Text (SpeechRecognition) ─────────────────────────── */
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let isListening = false;
+// True only when the current/last message was sent via voice — controls TTS
+let voiceMode = false;
+// The language selected by the user for speaking (BCP-47 tag)
+let selectedLang = "en-IN";
+
+langSelect.addEventListener("change", () => {
+  selectedLang = langSelect.value;
+});
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  // lang is set to the user's chosen language right before starting
+
+  recognition.onstart = () => {
+    isListening = true;
+    micBtn.classList.add("mic-active");
+    micLabel.textContent = "Stop";
+    input.placeholder = "🎤 Listening…";
+  };
+
+  recognition.onresult = (e) => {
+    let interim = "", final = "";
+    for (const res of e.results) {
+      if (res.isFinal) {
+        final += res[0].transcript;
+      } else {
+        interim += res[0].transcript;
+      }
+    }
+    input.value = final || interim;
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 140) + "px";
+    // When a final transcript is ready, auto-submit it
+    if (final) {
+      stopListening();
+      sendMessage(final, true); // true = voice-triggered, enable TTS
+    }
+  };
+
+  recognition.onerror = (e) => {
+    stopListening();
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      // Microphone permission was denied by the user or the browser policy.
+      // This happens when: the page is served over plain http (not localhost),
+      // or the user previously clicked "Block" on the permission prompt.
+      disableMic(
+        "Microphone access was blocked. To enable voice input:\n" +
+        "1. Click the 🔒 / ⓘ icon in the browser address bar.\n" +
+        "2. Set Microphone → Allow, then refresh the page.\n\n" +
+        "Note: Voice requires a secure connection (https or localhost). " +
+        "If you're opening the file directly or using plain http, switch to localhost."
+      );
+    } else if (e.error === "audio-capture") {
+      disableMic("No microphone was found. Please connect a microphone and refresh the page.");
+    } else if (e.error !== "aborted" && e.error !== "no-speech") {
+      addMessage("Voice input error: " + e.error + ". Please try typing instead.", "assistant");
+    }
+  };
+
+  recognition.onend = () => stopListening();
+
+  micBtn.addEventListener("click", () => {
+    if (isListening) {
+      recognition.stop();
+    } else {
+      recognition.lang = selectedLang;
+      try { recognition.start(); } catch (_) { /* already started */ }
+    }
+  });
+} else {
+  // Browser does not support Web Speech API
+  micBtn.title = "Voice input not supported in this browser (try Chrome or Edge)";
+  micBtn.disabled = true;
+  micBtn.style.opacity = "0.4";
+}
+
+function stopListening() {
+  isListening = false;
+  micBtn.classList.remove("mic-active");
+  micLabel.textContent = "Voice";
+  input.placeholder = "Ask a healthcare question...";
+}
+
+function disableMic(reason) {
+  micBtn.disabled = true;
+  micBtn.title = reason;
+  micLabel.textContent = "Blocked";
+  // Show a short toast-style message in the chat instead of a raw error code
+  const short = reason.split("\n")[0]; // first line only for the bubble
+  addMessage("🎤 " + short, "assistant");
+}
+
+/* ── Text-to-Speech (SpeechSynthesis) ───────────────────────────── */
+
+// Only speaks when the conversation was voice-triggered
+function speak(text) {
+  if (!voiceMode || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = selectedLang;
+  utter.rate = 0.95;
+  // Show Stop Audio button while speaking, hide when done
+  stopAudioBtn.style.display = "inline-flex";
+  utter.onend = () => { stopAudioBtn.style.display = "none"; };
+  utter.onerror = () => { stopAudioBtn.style.display = "none"; };
+  window.speechSynthesis.speak(utter);
+}
+
+stopAudioBtn.addEventListener("click", () => {
+  window.speechSynthesis && window.speechSynthesis.cancel();
+  stopAudioBtn.style.display = "none";
+});
+
+function addMessage(text, role) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `message ${role}`;
+  wrapper.innerHTML = `
+    <div class="avatar">${role === "assistant" ? "C" : "Y"}</div>
+    <div class="bubble">
+      <div class="message-meta">${role === "assistant" ? "CAREBRIDGE" : "YOU"}</div>
+      <p>${escapeHtml(text).replace(/\n/g, "<br>")}</p>
+    </div>`;
+  messages.appendChild(wrapper);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function addTyping() {
+  const wrapper = document.createElement("div");
+  wrapper.id = "typing";
+  wrapper.className = "message assistant";
+  wrapper.innerHTML = `
+    <div class="avatar">C</div>
+    <div class="bubble typing">
+      <span></span><span></span><span></span>
+    </div>`;
+  messages.appendChild(wrapper);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, c => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;"
+  }[c]));
+}
+
+/* ── Medicine Image Analysis ─────────────────────────────────────── */
+
+// Open file picker when the Image button is clicked
+imageBtn.addEventListener("click", () => imageInput.click());
+
+// When user picks a file — show preview bar
+imageInput.addEventListener("change", () => {
+  const file = imageInput.files[0];
+  if (!file) return;
+  imagePreviewThumb.src = URL.createObjectURL(file);
+  imagePreviewName.textContent = file.name;
+  imagePreviewBar.style.display = "flex";
+  // Hint the user to press Send or just wait — they can also type a caption
+  input.placeholder = "Add a note (optional) then press Send…";
+});
+
+// Clear the selected image
+imageClearBtn.addEventListener("click", () => {
+  imageInput.value = "";
+  imagePreviewBar.style.display = "none";
+  imagePreviewThumb.src = "";
+  input.placeholder = "Ask a healthcare question...";
+});
+
+async function analyzeImage(file, caption) {
+  // Show the uploaded image as a user message bubble with thumbnail
+  const objectUrl = URL.createObjectURL(file);
+  const wrapper = document.createElement("div");
+  wrapper.className = "message user";
+  wrapper.innerHTML = `
+    <div class="avatar">Y</div>
+    <div class="bubble">
+      <div class="message-meta">YOU</div>
+      <img src="${objectUrl}" class="chat-image-thumb" alt="Uploaded medicine">
+      ${caption ? `<p>${escapeHtml(caption)}</p>` : ""}
+    </div>`;
+  messages.appendChild(wrapper);
+  messages.scrollTop = messages.scrollHeight;
+
+  // Clear the preview bar
+  imageClearBtn.click();
+  input.value = "";
+  input.style.height = "auto";
+
+  sendBtn.disabled = true;
+  addTyping();
+
+  try {
+    const formData = new FormData();
+    formData.append("image", file);
+    if (caption) formData.append("caption", caption);
+
+    const response = await fetch("/api/analyze-image", {
+      method: "POST",
+      body: formData
+    });
+    const data = await response.json();
+    document.getElementById("typing")?.remove();
+
+    if (!response.ok) {
+      const detail = data.detail ? `\n\nDetail: ${data.detail}` : "";
+      addMessage((data.error || "Could not analyse the image.") + detail, "assistant");
+      return;
+    }
+    addMessage(data.answer, "assistant");
+  } catch (err) {
+    document.getElementById("typing")?.remove();
+    addMessage("Could not reach the server. Please check your connection.", "assistant");
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+// fromVoice=true  → came from mic button, so speak the reply
+// fromVoice=false → came from keyboard/form, stay silent
+async function sendMessage(text, fromVoice = false) {
+  text = text.trim();
+  if (!text) return;
+
+  voiceMode = fromVoice;   // remember how this message was triggered
+
+  addMessage(text, "user");
+  input.value = "";
+  input.style.height = "auto";
+  sendBtn.disabled = true;
+  addTyping();
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({message: text})
+    });
+    const data = await response.json();
+    document.getElementById("typing")?.remove();
+
+    if (!response.ok) {
+      addMessage(data.error || "Something went wrong.", "assistant");
+      return;
+    }
+    addMessage(data.answer, "assistant");
+    speak(data.answer);   // only speaks if voiceMode is true
+  } catch (err) {
+    document.getElementById("typing")?.remove();
+    addMessage("I couldn't connect to the CareBridge backend. Check that the server is running.", "assistant");
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
+
+form.addEventListener("submit", e => {
+  e.preventDefault();
+  const file = imageInput.files[0];
+  if (file) {
+    analyzeImage(file, input.value.trim());
+  } else {
+    sendMessage(input.value);
+  }
+});
+
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+input.addEventListener("input", () => {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 140) + "px";
+});
+
+document.querySelectorAll(".prompt-card").forEach(btn => {
+  btn.addEventListener("click", () => sendMessage(btn.dataset.prompt));
+});
+
+clearBtn.addEventListener("click", () => {
+  window.speechSynthesis && window.speechSynthesis.cancel();
+  messages.innerHTML = `
+    <div class="message assistant">
+      <div class="avatar">C</div>
+      <div class="bubble">
+        <div class="message-meta">CAREBRIDGE</div>
+        <p>Conversation cleared. What would you like to know?</p>
+      </div>
+    </div>`;
+  input.focus();
+});
+
+</script>
+</body>
+</html>
