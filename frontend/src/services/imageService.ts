@@ -13,6 +13,7 @@ export async function analyzeImage(file: File, language = 'en'): Promise<ImageAn
   const response = await fetch(`${API_BASE_URL}/analyze-image`, {
     method: 'POST',
     body: formData,
+    credentials: 'include',   // send session cookie
     // Do NOT set Content-Type — browser sets it automatically with the boundary
   });
 

@@ -1,19 +1,38 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, send_from_directory, request, jsonify, session
 from flask_cors import CORS
 from main import agent, get_answer
 import os
 import re
 import time
 import base64
+import uuid
 import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
+# Resolve the built React app directory (one level up from this file)
+_ROOT         = os.path.dirname(os.path.abspath(__file__))
+_FRONTEND_DIR = os.path.join(_ROOT, "frontend_dist")
 
-# Allow requests from the Vite dev server and any local origin
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]}})
+app = Flask(__name__, static_folder=_FRONTEND_DIR, static_url_path="")
+app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
+
+# Session cookie must be Lax (not Strict) so it is sent on same-origin fetch()
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+
+# Allow the Vite dev server to reach /api/* during development.
+# supports_credentials=True is needed so the browser sends the session cookie.
+CORS(app,
+     resources={r"/api/*": {"origins": [
+         "http://localhost:5173",
+         "http://127.0.0.1:5173",
+         "http://localhost:3000",
+         "http://localhost:5000",
+         "http://127.0.0.1:5000",
+     ]}},
+     supports_credentials=True)
 
 MEDICINE_PROMPT = """You are CareBridge, an AI healthcare awareness assistant.
 
@@ -118,9 +137,21 @@ MOCK_RESOURCES = [
 # Routes
 # ---------------------------------------------------------------------------
 
-@app.get("/")
-def index():
-    return render_template("index.html")
+@app.get("/", defaults={"path": ""})
+@app.get("/<path:path>")
+def serve_frontend(path: str):
+    """Serve the built React app for every non-API route."""
+    # Serve a real file if it exists (JS, CSS, assets…)
+    full = os.path.join(_FRONTEND_DIR, path)
+    if path and os.path.isfile(full):
+        return send_from_directory(_FRONTEND_DIR, path)
+    # Fall back to index.html so React Router handles the route
+    return send_from_directory(_FRONTEND_DIR, "index.html")
+
+
+# In-memory conversation history keyed by session ID.
+# Each value is a list of LangChain message dicts.
+_conversations: dict = {}
 
 
 @app.post("/api/chat")
@@ -132,11 +163,29 @@ def chat():
     if not query:
         return jsonify({"error": "Please enter a message."}), 400
 
+    # Assign a session ID so conversation history persists across requests
+    if "sid" not in session:
+        session["sid"] = str(uuid.uuid4())
+    sid = session["sid"]
+
+    history = _conversations.setdefault(sid, [])
+
+    # Inject language instruction into the user message when non-English
+    lang_names = {"en": "English", "hi": "Hindi"}
+    lang_name = lang_names.get(language, "English")
+    user_content = query
+    if language != "en":
+        user_content = f"[Please reply in {lang_name}] {query}"
+
+    history.append({"role": "user", "content": user_content})
+
     try:
-        result = agent.invoke({
-            "messages": [{"role": "user", "content": query}]
-        })
+        result = agent.invoke({"messages": history})
         answer_text = get_answer(result)
+
+        # Update history with the full message list returned by the agent
+        # (includes tool calls, intermediate steps, etc.)
+        _conversations[sid] = result.get("messages", history)
 
         return jsonify({
             "message": answer_text,
@@ -145,10 +194,21 @@ def chat():
             "sources": [{"title": "CareBridge AI", "url": "#"}],
         })
     except Exception as exc:
+        # Remove the last user message from history so it can be retried
+        if history:
+            history.pop()
         return jsonify({
             "error": "CareBridge could not process that request.",
             "detail": str(exc)
         }), 500
+
+
+@app.post("/api/clear")
+def clear_history():
+    """Clears the server-side conversation history for this session."""
+    if "sid" in session:
+        _conversations.pop(session["sid"], None)
+    return jsonify({"ok": True})
 
 
 @app.get("/api/resources")
@@ -182,13 +242,13 @@ def resources():
 # ---------------------------------------------------------------------------
 
 _OR_VISION_MODELS = [
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     "google/gemma-4-26b-a4b-it:free",
     "google/gemma-4-31b-it:free",
-    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
 ]
 
-_RETRIES_PER_MODEL = 1
-_RETRY_DELAY_SECONDS = 2
+_RETRIES_PER_MODEL = 2
+_RETRY_DELAY_SECONDS = 3
 
 
 _LANGUAGE_NAMES = {
@@ -239,12 +299,12 @@ def analyze_image():
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
     data_url = f"data:{mime_type};base64,{b64_image}"
 
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY")
 
     if not api_key:
         return jsonify({
             "error": "Server is missing the OpenRouter API key.",
-            "detail": "GEMINI_API_KEY is not set in your .env file."
+            "detail": "OPENROUTER_API_KEY is not set in your .env file."
         }), 500
 
     last_error = None
@@ -257,24 +317,34 @@ def analyze_image():
                 resp = _call_openrouter_vision(model_name, api_key, data_url, lang_name)
             except Exception as exc:
                 last_error = str(exc)
-                break
+                break  # network error — skip to next model
 
-            if resp.status_code == 200:
-                answer = resp.json()["choices"][0]["message"]["content"]
+            body = resp.json()
+
+            # OpenRouter sometimes returns status 200 with an error payload
+            # (e.g. {"error": {"code": 429, ...}}) — handle that too
+            if resp.status_code == 200 and "choices" in body:
+                answer = body["choices"][0]["message"]["content"]
                 return jsonify({"answer": answer, "model_used": model_name})
 
-            last_error = f"{resp.status_code} {resp.text}"
+            # Extract a readable error from the body if possible
+            err_body = body.get("error", {})
+            err_code = err_body.get("code", resp.status_code)
+            err_msg  = err_body.get("message", resp.text)
+            last_error = f"{err_code}: {err_msg}"
 
-            if resp.status_code == 429:
+            # Rate-limited — retry after delay, then move to next model
+            if resp.status_code == 429 or err_code == 429:
                 if attempt < attempts - 1:
                     time.sleep(_RETRY_DELAY_SECONDS)
                     continue
-                else:
-                    break
+                break  # exhausted retries for this model
 
+            # Model not found — skip immediately
             if resp.status_code == 404:
                 break
 
+            # Any other non-200 — report immediately
             return jsonify({
                 "error": "Image analysis failed.",
                 "detail": last_error
@@ -287,6 +357,7 @@ def analyze_image():
 
 
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
     use_https = os.getenv("USE_HTTPS", "0") == "1"
 
     if use_https:
@@ -298,14 +369,16 @@ if __name__ == "__main__":
             if not os.path.exists(cert_path + ".crt"):
                 make_ssl_devcert(cert_path, host="localhost")
             ssl_ctx = (cert_path + ".crt", cert_path + ".key")
-            print("Running with HTTPS — open https://<your-ip>:5000 in the browser.")
-            print("You may need to accept the self-signed certificate warning once.")
+            print(f"Running with HTTPS — open https://localhost:{port} in the browser.")
         except Exception as e:
             print(f"Could not create SSL cert ({e}); falling back to plain HTTP.")
             ssl_ctx = None
     else:
         ssl_ctx = None
-        print("Tip: set USE_HTTPS=1 to enable HTTPS so voice works over the network.")
-        print("For local use, open http://localhost:5000 (voice works on localhost).")
+        print(f"CareBridge is running → open http://localhost:{port}")
+        print("NOTE: Voice input requires the page to be open on localhost (not an IP address).")
 
-    app.run(host="0.0.0.0", port=5000, debug=True, ssl_context=ssl_ctx)
+    # Bind only to localhost — this is intentional.
+    # Voice (SpeechRecognition) and cookies require a secure context.
+    # localhost is treated as secure by all browsers; a plain-http IP address is not.
+    app.run(host="127.0.0.1", port=port, debug=False, ssl_context=ssl_ctx)

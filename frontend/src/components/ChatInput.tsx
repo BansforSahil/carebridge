@@ -26,9 +26,14 @@ export default function ChatInput({
   const [input, setInput] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  // True when the current textarea content was filled by voice — so Send triggers TTS
+  const filledByVoiceRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Always holds the latest onSend so recognition callbacks are never stale
+  const onSendRef = useRef(onSend);
+  useEffect(() => { onSendRef.current = onSend; }, [onSend]);
 
   // Stop recognition if the parent disables input mid-listen
   useEffect(() => {
@@ -56,47 +61,77 @@ export default function ChatInput({
     recognitionRef.current = recognition;
 
     recognition.lang = SPEECH_LOCALE[language] || 'en-IN';
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    // continuous=true — mic stays open until the user clicks Stop.
+    // interimResults=true — live text appears in the textarea while speaking.
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+
+    // Plain variables — not React state — so onend always reads the latest
+    // value regardless of React's async batching.
+    let finalAccumulated = '';   // confirmed final words
+    let latestDisplay   = '';   // final + current interim (for display)
+    let submitted = false;
 
     recognition.onstart = () => setIsListening(true);
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInput(transcript);
-      // Auto-send after a short tick so state has updated
-      setTimeout(() => {
-        onSend(transcript.trim(), true);
-        setInput('');
-      }, 100);
+      if (submitted) return;
+
+      // Rescan all results every event — safe with continuous=true
+      let finals  = '';
+      let interim = '';
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finals  += event.results[i][0].transcript;
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+
+      finalAccumulated = finals;
+      latestDisplay    = finals + interim;
+      setInput(latestDisplay);
+      filledByVoiceRef.current = true;   // mark textarea as voice-filled
     };
 
     recognition.onerror = (event: any) => {
       setIsListening(false);
-      if (event.error === 'not-allowed') {
-        setVoiceError('Microphone access denied. Allow mic access in your browser settings.');
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setVoiceError(
+          'Mic blocked by browser. Fix: click the 🔒 lock icon in your address bar → Microphone → Allow → refresh the page.'
+        );
+      } else if (event.error === 'audio-capture') {
+        setVoiceError('No microphone found. Please connect one and refresh.');
       } else if (event.error === 'no-speech') {
         setVoiceError('No speech detected. Please try again.');
       } else if (event.error !== 'aborted') {
-        setVoiceError(`Voice error: ${event.error}`);
+        setVoiceError(`Voice error: ${event.error}. Try refreshing the page.`);
       }
     };
 
-    recognition.onend = () => setIsListening(false);
+    // onend fires when the user clicks Stop (recognition.stop()).
+    // Just stop listening — the user presses Send (or Enter) to submit.
+    recognition.onend = () => {
+      setIsListening(false);
+    };
 
     recognition.start();
-  }, [language, onSend]);
+  // onSend is intentionally excluded — we use onSendRef to avoid stale closures
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
 
   const stopListening = useCallback(() => {
+    // stop() triggers onend which will send the accumulated transcript
     recognitionRef.current?.stop();
-    setIsListening(false);
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !disabled) {
-      onSend(input.trim());
+      const fromVoice = filledByVoiceRef.current;
+      filledByVoiceRef.current = false;
+      onSend(input.trim(), fromVoice);
       setInput('');
     }
   };
@@ -153,7 +188,10 @@ export default function ChatInput({
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              filledByVoiceRef.current = false; // user typed manually — disable TTS on send
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();

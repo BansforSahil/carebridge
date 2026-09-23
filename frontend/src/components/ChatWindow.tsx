@@ -55,34 +55,82 @@ export default function ChatWindow({ language = 'en' }: ChatWindowProps) {
     setIsSpeaking(false);
   }, [language]);
 
+  // Chrome silently stops speaking on long texts — keep-alive fixes that
+  const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopKeepAlive = useCallback(() => {
+    if (keepAliveRef.current) { clearInterval(keepAliveRef.current); keepAliveRef.current = null; }
+  }, []);
+  const startKeepAlive = useCallback(() => {
+    stopKeepAlive();
+    keepAliveRef.current = setInterval(() => {
+      if (window.speechSynthesis?.speaking) {
+        window.speechSynthesis.pause();
+        window.speechSynthesis.resume();
+      } else {
+        stopKeepAlive();
+      }
+    }, 10000);
+  }, [stopKeepAlive]);
+
+  // Strip markdown so TTS doesn't read symbols aloud
+  const stripMarkdown = (text: string) =>
+    text
+      .replace(/[*_~`#>]/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\n{2,}/g, '. ')
+      .replace(/\n/g, ' ')
+      .trim();
+
+  // Keep a ref to the latest language so speakText is never stale
+  const languageRef = useRef(language);
+  useEffect(() => { languageRef.current = language; }, [language]);
+
   const speakText = useCallback((text: string) => {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
+    stopKeepAlive();
 
-    const clean = text.trim();
+    const clean = stripMarkdown(text);
+    if (!clean) return;
 
-    const locale = SPEECH_LOCALE[language] || 'en-IN';
+    // Always read from ref — never stale
+    const lang   = languageRef.current;
+    const locale = SPEECH_LOCALE[lang] || 'en-IN';
 
     const doSpeak = (voices: SpeechSynthesisVoice[]) => {
       const utterance = new SpeechSynthesisUtterance(clean);
+      // Setting lang is the most important part — even without an explicit voice
+      // the browser will attempt to use a matching TTS engine for that locale.
       utterance.lang = locale;
       utterance.rate = 0.95;
 
-      // Try to find an exact voice for the locale, fall back to language prefix
+      // Voice matching: exact locale → language prefix → any voice containing lang code
       const match =
         voices.find(v => v.lang === locale) ||
-        voices.find(v => v.lang.startsWith(language));
+        voices.find(v => v.lang.startsWith(lang)) ||
+        voices.find(v => v.lang.toLowerCase().includes(lang.toLowerCase()));
+
+      // Only assign voice if we found a genuine match.
+      // If we set utterance.voice to an English voice when lang is "hi",
+      // the browser will speak English — so it's better to leave it unset
+      // and let utterance.lang guide the engine selection.
       if (match) utterance.voice = match;
 
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onstart = () => { setIsSpeaking(true); startKeepAlive(); };
+      utterance.onend   = () => { setIsSpeaking(false); stopKeepAlive(); };
+      utterance.onerror = (e) => {
+        setIsSpeaking(false);
+        stopKeepAlive();
+        // Surface a helpful message if no voice was found for the language
+        if ((e as any).error === 'language-not-supported' || (e as any).error === 'synthesis-failed') {
+          console.warn(`[CareBridge TTS] No ${lang} voice found on this device. Available voices:`, voices.map(v => v.lang));
+        }
+      };
 
       window.speechSynthesis.speak(utterance);
     };
 
-    // getVoices() may return an empty list on first call (async load).
-    // If so, wait for the voiceschanged event then speak.
+    // Chrome loads voices asynchronously — wait for them if not ready yet
     const voices = window.speechSynthesis.getVoices();
     if (voices.length > 0) {
       doSpeak(voices);
@@ -93,15 +141,20 @@ export default function ChatWindow({ language = 'en' }: ChatWindowProps) {
         doSpeak(loaded);
       };
     }
-  }, [language]);
+  }, [startKeepAlive, stopKeepAlive]);
 
   const handleStopSpeaking = useCallback(() => {
     window.speechSynthesis?.cancel();
+    stopKeepAlive();
     setIsSpeaking(false);
-  }, []);
+  }, [stopKeepAlive]);
 
-  const handleSendMessage = async (text: string, fromVoice = false) => {
+  const handleSendMessage = useCallback(async (text: string, fromVoice = false) => {
+    // Capture fromVoice in a local variable — do NOT read voiceTriggeredRef after
+    // the await because a re-render could have reset it before the response arrives.
+    const wasVoice = fromVoice;
     voiceTriggeredRef.current = fromVoice;
+
     const userMessage: ChatMessageData = {
       id: Date.now().toString(),
       sender: 'user',
@@ -128,7 +181,8 @@ export default function ChatWindow({ language = 'en' }: ChatWindowProps) {
       };
 
       setMessages((prev) => [...prev, aiMessage]);
-      if (voiceTriggeredRef.current) speakText(response.message);
+      // Use the local variable — guaranteed to reflect this specific call
+      if (wasVoice) speakText(response.message);
     } catch {
       setMessages((prev) => [
         ...prev,
@@ -143,19 +197,19 @@ export default function ChatWindow({ language = 'en' }: ChatWindowProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [language, speakText]);
 
   // Called when user picks a file from ChatInput
-  const handleImageUpload = (file: File) => {
+  const handleImageUpload = useCallback((file: File) => {
     setPendingImage(file);
     setImagePreviewUrl(URL.createObjectURL(file));
-  };
+  }, []);
 
-  const handleCancelImage = () => {
+  const handleCancelImage = useCallback(() => {
     setPendingImage(null);
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(null);
-  };
+  }, [imagePreviewUrl]);
 
   const handleAnalyseImage = async () => {
     if (!pendingImage) return;
